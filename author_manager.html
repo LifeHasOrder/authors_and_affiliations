@@ -985,7 +985,7 @@
                     result += (style.separator === ',' ? ', and ' : ' and ');
                 } else if (i === authorStrings.length - 1) {
                     // Last author - no separator needed regardless of useAnd setting
-                    if (style.useAnd && style.markerPosition === 'after-separator') {
+                    if (style.markerPosition === 'after-separator') {
                         result += current.marker;
                     }
                 } else {
