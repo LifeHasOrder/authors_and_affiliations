@@ -495,43 +495,75 @@
         }
         
         // Copy preview content to clipboard
-        function copyPreviewContent(elementId) {
+        async function copyPreviewContent(elementId) {
             const element = document.getElementById(elementId);
             if (!element) return;
             
-            // Get text content, preserving line breaks
-            let text = element.textContent || element.innerText;
+            // Get both HTML and plain text content
+            const htmlContent = element.innerHTML;
+            const textContent = element.textContent || element.innerText;
             
-            // Use the Clipboard API if available
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(text).then(() => {
-                    showMessage('Copied to clipboard!', 'success');
-                }).catch(() => {
+            try {
+                // Use modern Clipboard API with HTML support if available
+                if (navigator.clipboard && navigator.clipboard.write) {
+                    const clipboardItems = [
+                        new ClipboardItem({
+                            'text/html': new Blob([htmlContent], { type: 'text/html' }),
+                            'text/plain': new Blob([textContent], { type: 'text/plain' })
+                        })
+                    ];
+                    await navigator.clipboard.write(clipboardItems);
+                    showMessage('Copied to clipboard with formatting!', 'success');
+                } else if (navigator.clipboard && navigator.clipboard.writeText) {
+                    // Fallback to plain text for browsers that support Clipboard API but not HTML
+                    await navigator.clipboard.writeText(textContent);
+                    showMessage('Copied to clipboard (plain text only)', 'success');
+                } else {
                     // Fallback for older browsers
-                    fallbackCopyToClipboard(text);
-                });
-            } else {
-                // Fallback for older browsers
-                fallbackCopyToClipboard(text);
+                    fallbackCopyToClipboard(htmlContent, textContent);
+                }
+            } catch (err) {
+                // If HTML clipboard fails, try plain text fallback
+                try {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        await navigator.clipboard.writeText(textContent);
+                        showMessage('Copied to clipboard (plain text fallback)', 'success');
+                    } else {
+                        fallbackCopyToClipboard(htmlContent, textContent);
+                    }
+                } catch (err2) {
+                    fallbackCopyToClipboard(htmlContent, textContent);
+                }
             }
         }
         
         // Fallback copy method for older browsers
-        function fallbackCopyToClipboard(text) {
+        function fallbackCopyToClipboard(htmlContent, textContent) {
+            // For the fallback, we'll try to copy the HTML content if possible
+            // but fall back to plain text for broader compatibility
+            const contentToCopy = textContent || htmlContent;
+            
             const textArea = document.createElement('textarea');
-            textArea.value = text;
+            textArea.value = contentToCopy;
             textArea.style.position = 'fixed';
             textArea.style.top = '-1000px';
             document.body.appendChild(textArea);
             textArea.select();
+            
             try {
-                document.execCommand('copy');
-                showMessage('Copied to clipboard!', 'success');
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    showMessage('Copied to clipboard!', 'success');
+                } else {
+                    throw new Error('execCommand failed');
+                }
             } catch (err) {
                 showMessage('Could not copy to clipboard. Text logged to console.', 'error');
-                console.log('Copy failed, text content:', text);
+                console.log('Copy failed, HTML content:', htmlContent);
+                console.log('Copy failed, text content:', textContent);
+            } finally {
+                document.body.removeChild(textArea);
             }
-            document.body.removeChild(textArea);
         }
         
         // Add message explaining standalone mode functionality
