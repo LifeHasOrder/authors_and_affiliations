@@ -221,6 +221,12 @@
             color: #721c24;
             border: 1px solid #f5c6cb;
         }
+        
+        .message.info {
+            background-color: #cce7ff;
+            color: #004085;
+            border: 1px solid #99d5ff;
+        }
         .edit-dialog {
             position: fixed;
             top: 0;
@@ -410,8 +416,16 @@
         let authors = [];
         let affiliations = [];
         
+        // Check if running in standalone mode
+        function isStandaloneMode() {
+            return !(typeof google !== 'undefined' && google.script && google.script.run);
+        }
+        
         // Initialize on load
         window.onload = function() {
+            if (isStandaloneMode()) {
+                adaptUIForStandaloneMode();
+            }
             loadData();
             // Attach event listeners for the formatting tab
             document.getElementById('separator-style').addEventListener('change', updatePreview);
@@ -420,6 +434,126 @@
             document.getElementById('marker-style').addEventListener('change', updatePreview);
             document.getElementById('marker-position').addEventListener('change', updatePreview);
         };
+        
+        // Adapt UI for standalone mode
+        function adaptUIForStandaloneMode() {
+            // Hide export tab completely as it's not supported in standalone mode
+            const exportTab = document.querySelector('button[onclick="showTab(\'export\')"]');
+            const exportTabContent = document.getElementById('export-tab');
+            if (exportTab) exportTab.style.display = 'none';
+            if (exportTabContent) exportTabContent.style.display = 'none';
+            
+            // Rename preview tab to "Output" for standalone mode
+            const previewTab = document.querySelector('button[onclick="showTab(\'preview\')"]');
+            if (previewTab) previewTab.textContent = 'Output';
+            
+            // Hide insert buttons in preview tab (they don't work in standalone mode)
+            setTimeout(() => {
+                const insertButtons = document.querySelectorAll('#preview-tab button[onclick*="insert"]');
+                insertButtons.forEach(btn => btn.style.display = 'none');
+                
+                // Update save/load button labels for standalone mode
+                const saveButton = document.querySelector('button[onclick="saveData()"]');
+                const loadButton = document.querySelector('button[onclick="loadData()"]');
+                if (saveButton) saveButton.textContent = 'Save to Browser';
+                if (loadButton) loadButton.textContent = 'Reload from Browser';
+                
+                // Add copy buttons to preview sections
+                addCopyButtonsToPreview();
+                
+                // Add standalone mode message
+                addStandaloneModeMessage();
+            }, 100);
+        }
+        
+        // Add copy buttons to preview sections
+        function addCopyButtonsToPreview() {
+            const authorPreview = document.getElementById('author-preview');
+            const affiliationPreview = document.getElementById('affiliation-preview');
+            
+            if (authorPreview && !authorPreview.parentNode.querySelector('.copy-btn')) {
+                const copyBtn = createCopyButton('author-preview', 'Copy Author List');
+                authorPreview.parentNode.appendChild(copyBtn);
+            }
+            
+            if (affiliationPreview && !affiliationPreview.parentNode.querySelector('.copy-btn')) {
+                const copyBtn = createCopyButton('affiliation-preview', 'Copy Affiliation List');
+                affiliationPreview.parentNode.appendChild(copyBtn);
+            }
+        }
+        
+        // Create a copy button for a preview element
+        function createCopyButton(targetId, buttonText) {
+            const button = document.createElement('button');
+            button.className = 'btn btn-secondary copy-btn';
+            button.textContent = buttonText;
+            button.style.marginTop = '10px';
+            button.onclick = function() {
+                copyPreviewContent(targetId);
+            };
+            return button;
+        }
+        
+        // Copy preview content to clipboard
+        function copyPreviewContent(elementId) {
+            const element = document.getElementById(elementId);
+            if (!element) return;
+            
+            // Get text content, preserving line breaks
+            let text = element.textContent || element.innerText;
+            
+            // Use the Clipboard API if available
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(() => {
+                    showMessage('Copied to clipboard!', 'success');
+                }).catch(() => {
+                    // Fallback for older browsers
+                    fallbackCopyToClipboard(text);
+                });
+            } else {
+                // Fallback for older browsers
+                fallbackCopyToClipboard(text);
+            }
+        }
+        
+        // Fallback copy method for older browsers
+        function fallbackCopyToClipboard(text) {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.top = '-1000px';
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                showMessage('Copied to clipboard!', 'success');
+            } catch (err) {
+                showMessage('Could not copy to clipboard. Text logged to console.', 'error');
+                console.log('Copy failed, text content:', text);
+            }
+            document.body.removeChild(textArea);
+        }
+        
+        // Add message explaining standalone mode functionality
+        function addStandaloneModeMessage() {
+            const previewTab = document.getElementById('preview-tab');
+            if (!previewTab || previewTab.querySelector('.standalone-info')) return;
+            
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'standalone-info';
+            infoDiv.style.cssText = 'background: #e3f2fd; border: 1px solid #1976d2; border-radius: 4px; padding: 15px; margin-bottom: 20px;';
+            infoDiv.innerHTML = `
+                <div style="color: #1976d2; font-weight: bold; margin-bottom: 8px;">
+                    📋 Standalone Mode
+                </div>
+                <div style="color: #1565c0; font-size: 14px;">
+                    You're running in standalone mode. Use the copy buttons below to get your formatted author and affiliation lists. 
+                    Save/load functions are limited to browser session only.
+                </div>
+            `;
+            
+            previewTab.insertBefore(infoDiv, previewTab.firstChild);
+        }
         
         // Tab management
         function showTab(tabName) {
@@ -856,30 +990,69 @@
         }
 
         async function saveData() {
-            try {
-                const result = await runGoogleScript('saveAuthorData', authors, affiliations);
-                if (result.success) {
-                    showMessage(result.message, 'success');
-                } else {
-                    showMessage(result.message, 'error');
+            if (isStandaloneMode()) {
+                // In standalone mode, save to localStorage
+                try {
+                    const data = {
+                        authors: authors,
+                        affiliations: affiliations,
+                        timestamp: new Date().toISOString()
+                    };
+                    localStorage.setItem('authorManager_data', JSON.stringify(data));
+                    showMessage('Data saved to browser storage (session only)', 'success');
+                } catch (error) {
+                    showMessage('Failed to save data: ' + error.message, 'error');
                 }
-            } catch (error) {
-                showMessage(error.message, 'error');
+            } else {
+                try {
+                    const result = await runGoogleScript('saveAuthorData', authors, affiliations);
+                    if (result.success) {
+                        showMessage(result.message, 'success');
+                    } else {
+                        showMessage(result.message, 'error');
+                    }
+                } catch (error) {
+                    showMessage(error.message, 'error');
+                }
             }
         }
         
         async function loadData() {
-            try {
-                const data = await runGoogleScript('loadAuthorData');
-                authors = data.authors || [];
-                affiliations = data.affiliations || [];
-                renderAll();
-                showMessage('Data loaded successfully', 'success');
-            } catch (error) {
-                showMessage(error.message, 'error');
-                authors = [];
-                affiliations = [];
-                renderAll();
+            if (isStandaloneMode()) {
+                // In standalone mode, load from localStorage
+                try {
+                    const savedData = localStorage.getItem('authorManager_data');
+                    if (savedData) {
+                        const data = JSON.parse(savedData);
+                        authors = data.authors || [];
+                        affiliations = data.affiliations || [];
+                        renderAll();
+                        showMessage('Data loaded from browser storage', 'success');
+                    } else {
+                        authors = [];
+                        affiliations = [];
+                        renderAll();
+                        showMessage('No saved data found. Starting fresh.', 'info');
+                    }
+                } catch (error) {
+                    showMessage('Failed to load data: ' + error.message, 'error');
+                    authors = [];
+                    affiliations = [];
+                    renderAll();
+                }
+            } else {
+                try {
+                    const data = await runGoogleScript('loadAuthorData');
+                    authors = data.authors || [];
+                    affiliations = data.affiliations || [];
+                    renderAll();
+                    showMessage('Data loaded successfully', 'success');
+                } catch (error) {
+                    showMessage(error.message, 'error');
+                    authors = [];
+                    affiliations = [];
+                    renderAll();
+                }
             }
         }
         
@@ -888,7 +1061,14 @@
                 authors = [];
                 affiliations = [];
                 renderAll();
-                showMessage('All data cleared. Save to make this permanent.', 'success');
+                
+                if (isStandaloneMode()) {
+                    // Also clear localStorage in standalone mode
+                    localStorage.removeItem('authorManager_data');
+                    showMessage('All data cleared from browser storage.', 'success');
+                } else {
+                    showMessage('All data cleared. Save to make this permanent.', 'success');
+                }
             }
         }
         
