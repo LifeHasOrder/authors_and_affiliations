@@ -636,18 +636,28 @@
                 const affText = parts[1] ? parts[1].trim() : '';
 
                 if (authorName && affText) {
-                    // Find or create the affiliation
-                    let affiliation = affiliations.find(a => a.text === affText);
-                    if (!affiliation) {
-                        affiliation = { id: generateId(), text: affText };
-                        affiliations.push(affiliation);
-                    }
+                    // Split affiliations by semicolons and process each one
+                    const affiliationTexts = affText.split(';')
+                        .map(text => text.trim())
+                        .filter(text => text.length > 0);
+                    
+                    const authorAffiliationIds = [];
+                    
+                    affiliationTexts.forEach(affText => {
+                        // Find or create the affiliation
+                        let affiliation = affiliations.find(a => a.text === affText);
+                        if (!affiliation) {
+                            affiliation = { id: generateId(), text: affText };
+                            affiliations.push(affiliation);
+                        }
+                        authorAffiliationIds.push(affiliation.id);
+                    });
 
-                    // Create the author
+                    // Create the author with all associated affiliations
                     const author = {
                         id: generateId(),
                         name: authorName,
-                        affiliationIds: [affiliation.id]
+                        affiliationIds: authorAffiliationIds
                     };
                     authors.push(author);
                     authorsAdded++;
@@ -973,12 +983,13 @@
                 if (i === authorStrings.length - 2 && style.useAnd) {
                     result += aftersep;
                     result += (style.separator === ',' ? ', and ' : ' and ');
-                } else if (i === authorStrings.length - 1 && style.useAnd) {
+                } else if (i === authorStrings.length - 1) {
+                    // Last author - no separator needed regardless of useAnd setting
                     if (style.markerPosition === 'after-separator') {
                         result += current.marker;
-                    } else {
                     }
                 } else {
+                    // All other authors get separator
                     result += style.separator;
                     result += aftersep;
                 }
