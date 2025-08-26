@@ -1,19 +1,18 @@
 /**
  * Author and Affiliation Manager for Google Docs and Sheets
- * This script creates a user interface to manage author lists and their affiliations
- * with customizable formatting for different journal requirements
+ * Last updated: 2025-08-21
+ * @author LifeHasOrder
  */
 
 // Global variables for author data
-var authorData = [];
-var affiliationData = [];
+let authorData = [];
+let affiliationData = [];
 
 /**
- * Creates custom menu items when the document is opened
+ * Creates custom menu items when the document is opened.
  */
 function onOpen() {
-  var ui;
-  
+  let ui;
   try {
     // Try to get DocumentApp UI (for Google Docs)
     ui = DocumentApp.getUi();
@@ -29,6 +28,7 @@ function onOpen() {
   
   ui.createMenu('Author Manager')
     .addItem('Manage Authors & Affiliations', 'showAuthorManager')
+    .addSeparator()
     .addItem('Insert Author List', 'insertAuthorList')
     .addItem('Insert Affiliation List', 'insertAffiliationList')
     .addItem('Insert Full Citation Block', 'insertFullCitation')
@@ -41,15 +41,14 @@ function onOpen() {
 }
 
 /**
- * Shows the main author management interface
+ * Shows the main author management interface.
  */
 function showAuthorManager() {
-  var html = HtmlService.createHtmlOutputFromFile('AuthorManager')
+  const html = HtmlService.createHtmlOutputFromFile('author_manager')
     .setWidth(800)
-    .setHeight(600)
-    .setTitle('Author & Affiliation Manager');
-  
-  var ui;
+    .setHeight(600);
+    
+  let ui;
   try {
     ui = DocumentApp.getUi();
   } catch (e) {
@@ -60,11 +59,13 @@ function showAuthorManager() {
 }
 
 /**
- * Saves author and affiliation data
+ * Saves author and affiliation data.
+ * @param {Array} authors - Array of author objects
+ * @param {Array} affiliations - Array of affiliation objects
+ * @return {Object} Result object with success status and message
  */
 function saveAuthorData(authors, affiliations) {
-  var properties = PropertiesService.getDocumentProperties();
-  
+  const properties = PropertiesService.getDocumentProperties();
   try {
     properties.setProperties({
       'authors': JSON.stringify(authors),
@@ -75,695 +76,592 @@ function saveAuthorData(authors, affiliations) {
     authorData = authors;
     affiliationData = affiliations;
     
-    return {success: true, message: 'Data saved successfully!'};
+    return { success: true, message: 'Data saved successfully!' };
   } catch (e) {
-    return {success: false, message: 'Error saving data: ' + e.toString()};
+    return { success: false, message: 'Error saving data: ' + e.toString() };
   }
 }
 
 /**
- * Loads saved author and affiliation data
+ * Loads saved author and affiliation data.
+ * @return {Object} Object containing authors and affiliations arrays
  */
 function loadAuthorData() {
-  var properties = PropertiesService.getDocumentProperties();
-  
+  const properties = PropertiesService.getDocumentProperties();
   try {
-    var authorsJson = properties.getProperty('authors');
-    var affiliationsJson = properties.getProperty('affiliations');
+    const authorsJson = properties.getProperty('authors');
+    const affiliationsJson = properties.getProperty('affiliations');
     
-    var authors = authorsJson ? JSON.parse(authorsJson) : [];
-    var affiliations = affiliationsJson ? JSON.parse(affiliationsJson) : [];
+    const authors = authorsJson ? JSON.parse(authorsJson) : [];
+    const affiliations = affiliationsJson ? JSON.parse(affiliationsJson) : [];
     
-    return {
-      authors: authors,
-      affiliations: affiliations
-    };
+    return { authors, affiliations };
   } catch (e) {
     Logger.log('Error loading data: ' + e.toString());
-    return {
-      authors: [],
-      affiliations: []
-    };
+    return { authors: [], affiliations: [] };
   }
 }
 
 /**
- * Gets ordered affiliations based on author order
+ * Gets ordered affiliations based on author order.
+ * @param {Array} authors - Array of author objects
+ * @param {Array} affiliations - Array of affiliation objects
+ * @return {Array} Ordered array of affiliations
  */
 function getOrderedAffiliations(authors, affiliations) {
-  var usedAffiliationIds = [];
-  var affiliationOrder = {};
+  const usedAffiliationIds = new Set();
+  const ordered = [];
   
-  // Go through authors in order and collect their affiliations
-  authors.forEach(function(author) {
+  authors.forEach(author => {
     if (author.affiliationIds && author.affiliationIds.length > 0) {
-      // Sort author's affiliations alphabetically by text for consistency
-      var authorAffs = author.affiliationIds.map(function(id) {
-        return affiliations.find(function(aff) { return aff.id === id; });
-      }).filter(function(aff) { return aff; }).sort(function(a, b) {
-        return a.text.localeCompare(b.text);
-      });
-      
-      authorAffs.forEach(function(aff) {
-        if (usedAffiliationIds.indexOf(aff.id) === -1) {
-          usedAffiliationIds.push(aff.id);
-          affiliationOrder[aff.id] = usedAffiliationIds.length - 1;
+      // Sort affiliations by text before processing to ensure consistent order
+      const sortedAffiliationIds = author.affiliationIds
+        .map(id => affiliations.find(aff => aff.id === id))
+        .filter(Boolean)
+        .sort((a, b) => a.text.localeCompare(b.text))
+        .map(aff => aff.id);
+
+      sortedAffiliationIds.forEach(id => {
+        if (!usedAffiliationIds.has(id)) {
+          const aff = affiliations.find(a => a.id === id);
+          if (aff) {
+            usedAffiliationIds.add(id);
+            ordered.push(aff);
+          }
         }
       });
     }
   });
   
-  // Return ordered affiliations
-  return usedAffiliationIds.map(function(id) {
-    return affiliations.find(function(aff) { return aff.id === id; });
-  }).filter(function(aff) { return aff; });
+  return ordered;
 }
 
 /**
- * Formats the author list according to specified style
+ * Formats the author list according to specified style.
+ * @param {Array} authors - Array of author objects
+ * @param {Array} affiliations - Array of affiliation objects
+ * @param {Object} style - Formatting style options
+ * @return {Object} Formatted text and elements for superscript
  */
 function formatAuthorList(authors, affiliations, style) {
   if (!authors || authors.length === 0) {
-    return '';
+    return { text: '', elements: [] };
   }
+
+  // Ensure style has all required properties
+  style = style || {};
+  style.separator = style.separator || ',';
+  style.useAnd = style.useAnd !== false;
+  style.affiliationStyle = style.affiliationStyle || 'letters';
+  style.markerStyle = style.markerStyle || 'superscript';
+  style.markerPosition = style.markerPosition || 'after';
+
+  const orderedAffiliations = getOrderedAffiliations(authors, affiliations);
+  const affiliationMap = {};
+  let result = '';
+  const textElements = [];
   
-  var orderedAffiliations = getOrderedAffiliations(authors, affiliations);
-  var affiliationMap = {};
-  
-  // Create affiliation mapping based on author order
-  orderedAffiliations.forEach(function(aff, index) {
+  // Create affiliation mapping
+  orderedAffiliations.forEach((aff, index) => {
     affiliationMap[aff.id] = {
       text: aff.text,
-      marker: style.affiliationStyle === 'numbers' ? (index + 1).toString() : 
-              String.fromCharCode(97 + index) // a, b, c, etc.
+      marker: style.affiliationStyle === 'numbers' ? 
+             (index + 1).toString() : 
+             String.fromCharCode(97 + index)
     };
   });
-  
-  var result = '';
-  
-  // Format authors
-  for (var i = 0; i < authors.length; i++) {
-    var author = authors[i];
-    var authorText = author.name;
-    var markerText = '';
+
+  // Format each author
+  for (let i = 0; i < authors.length; i++) {
+    const author = authors[i];
+    let markerText = '';
+    let currentOffset;
     
     // Get affiliation markers
     if (author.affiliationIds && author.affiliationIds.length > 0) {
-      var markers = author.affiliationIds.map(function(id) {
-        return affiliationMap[id] ? affiliationMap[id].marker : '';
-      }).filter(function(marker) {
-        return marker !== '';
-      }).sort(); // Sort markers for consistency
+      const markers = author.affiliationIds
+        .map(id => affiliationMap[id] ? affiliationMap[id].marker : '')
+        .filter(marker => marker !== '')
+        .sort();
       
       if (markers.length > 0) {
-        var joinedMarkers = markers.join(',');
-        if (style.markerStyle === 'superscript') {
-          markerText = joinedMarkers;
+        markerText = markers.join(',');
+      }
+    }
+
+    // Add separator and handle marker position
+    if (i > 0) {
+      if (i === authors.length - 1 && style.useAnd) {
+        if (style.markerPosition === 'after-separator' && markerText) {
+          result += style.separator; // Remove extra space before marker
+          currentOffset = result.length;
+          result += markerText + ' and '; // Add space after marker
+          if (style.markerStyle === 'superscript') {
+            textElements.push({
+              start: currentOffset,
+              end: currentOffset + markerText.length
+            });
+          }
         } else {
-          markerText = '(' + joinedMarkers + ')';
+          result += style.separator === ',' ? ', and ' : ' and ';
+        }
+      } else {
+        if (style.markerPosition === 'after-separator' && markerText) {
+          result += style.separator; // Remove extra space before marker
+          currentOffset = result.length;
+          result += markerText + ' '; // Add space after marker
+          if (style.markerStyle === 'superscript') {
+            textElements.push({
+              start: currentOffset,
+              end: currentOffset + markerText.length
+            });
+          }
+        } else {
+          result += style.separator + ' ';
         }
       }
     }
-    
-    // Add separator before author (except first)
-    if (i > 0) {
-      if (i === authors.length - 1 && style.useAnd) {
-        result += style.separator === ',' ? ', and ' : ' and ';
-      } else {
-        result += style.separator + ' ';
-      }
-    }
-    
-    // Add author and marker based on position preference
+
+    // Add author name and marker
+    currentOffset = result.length;
     if (style.markerPosition === 'before' && markerText) {
-      result += markerText + authorText;
+      if (style.markerStyle === 'superscript') {
+        result += markerText;
+        textElements.push({
+          start: currentOffset,
+          end: currentOffset + markerText.length
+        });
+        result += author.name;
+      } else {
+        result += '(' + markerText + ')' + author.name;
+      }
+    } else if (style.markerPosition === 'after' && markerText) {
+      result += author.name;
+      currentOffset = result.length;
+      if (style.markerStyle === 'superscript') {
+        result += markerText;
+        textElements.push({
+          start: currentOffset,
+          end: currentOffset + markerText.length
+        });
+      } else {
+        result += '(' + markerText + ')';
+      }
     } else {
-      result += authorText + markerText;
+      result += author.name;
     }
   }
-  
-  return result;
+
+  return { text: result, elements: textElements };
 }
 
 /**
- * Formats the affiliation list based on author order
+ * Formats the affiliation list based on author order.
+ * @param {Array} authors - Array of author objects
+ * @param {Array} affiliations - Array of affiliation objects
+ * @param {Object} style - Formatting style options
+ * @return {Object} Formatted text and elements for superscript
  */
 function formatAffiliationList(authors, affiliations, style) {
-  var orderedAffiliations = getOrderedAffiliations(authors, affiliations);
-  
+  const orderedAffiliations = getOrderedAffiliations(authors, affiliations);
   if (orderedAffiliations.length === 0) {
-    return '';
+    return { text: '', elements: [] };
   }
-  
-  var formatted = '';
-  
-  for (var i = 0; i < orderedAffiliations.length; i++) {
-    var aff = orderedAffiliations[i];
-    var marker = style.affiliationStyle === 'numbers' ? (i + 1).toString() : 
-                String.fromCharCode(97 + i);
+
+  let formatted = '';
+  const textElements = [];
+
+  orderedAffiliations.forEach((aff, i) => {
+    const marker = style.affiliationStyle === 'numbers' ? 
+                  (i + 1).toString() : 
+                  String.fromCharCode(97 + i);
     
     if (i > 0) {
       formatted += '\n';
     }
     
+    const currentOffset = formatted.length;
     formatted += marker + ' ' + aff.text;
-  }
-  
-  return formatted;
+    
+    if (style.markerStyle === 'superscript') {
+      textElements.push({
+        start: currentOffset,
+        end: currentOffset + marker.length
+      });
+    }
+  });
+
+  return { text: formatted, elements: textElements };
 }
 
 /**
- * Inserts text with proper formatting (including superscripts for Docs)
+ * Helper function to get default style if none provided.
+ * @return {Object} Default style settings
+ */
+function getCurrentStyle() {
+  return {
+    separator: ',',
+    useAnd: true,
+    affiliationStyle: 'letters',
+    markerStyle: 'superscript',
+    markerPosition: 'after'
+  };
+}
+
+/**
+ * Inserts formatted text with superscripts into the document.
+ * @param {Array} authors - Array of author objects
+ * @param {Array} affiliations - Array of affiliation objects
+ * @param {Object} style - Formatting style options
+ * @param {boolean} includeAffiliations - Whether to include affiliation list
+ * @return {Object} Result object with success status
  */
 function insertFormattedText(authors, affiliations, style, includeAffiliations) {
   try {
-    var doc = DocumentApp.getActiveDocument();
-    var cursor = doc.getCursor();
-    var body = doc.getBody();
-    var insertionPoint;
+    const doc = DocumentApp.getActiveDocument();
+    const cursor = doc.getCursor();
+    const body = doc.getBody();
     
+    // Format the text first
+    const authorResult = formatAuthorList(authors, affiliations, style);
+    let fullText = authorResult.text;
+    const allElements = [...authorResult.elements];
+    
+    if (includeAffiliations) {
+      const affiliationResult = formatAffiliationList(authors, affiliations, style);
+      if (affiliationResult.text) {
+        const affiliationOffset = fullText.length + 2; // Account for \n\n
+        fullText += '\n\n' + affiliationResult.text;
+        // Adjust offset for affiliation markers
+        affiliationResult.elements.forEach(el => {
+          allElements.push({
+            start: el.start + affiliationOffset,
+            end: el.end + affiliationOffset
+          });
+        });
+      }
+    }
+
+    // Insert and format the text
+    let insertedElement;
     if (cursor) {
-      insertionPoint = cursor.getElement();
-      var offset = cursor.getOffset();
+      const element = cursor.getElement();
+      const offset = cursor.getOffset();
+      
+      if (element.editAsText) {
+        const text = element.editAsText();
+        text.insertText(offset, fullText);
+        insertedElement = text;
+        
+        // Apply superscript formatting to each marker
+        if (style.markerStyle === 'superscript') {
+          allElements.forEach(elem => {
+            insertedElement.setTextStyle(
+              offset + elem.start,
+              offset + elem.end - 1,
+              DocumentApp.newTextStyle()
+                .setBaselineOffset(DocumentApp.TextBaselineOffset.SUPERSCRIPT)
+                .build()
+            );
+          });
+        }
+      }
     } else {
-      var para = body.appendParagraph('');
-      insertionPoint = para;
-      var offset = 0;
+      // Append to end of document
+      const para = body.appendParagraph('');
+      insertedElement = para.editAsText();
+      insertedElement.setText(fullText);
+      
+      // Apply superscript formatting to each marker
+      if (style.markerStyle === 'superscript') {
+        allElements.forEach(elem => {
+          insertedElement.setTextStyle(
+            elem.start,
+            elem.end - 1,
+            DocumentApp.newTextStyle()
+              .setBaselineOffset(DocumentApp.TextBaselineOffset.SUPERSCRIPT)
+              .build()
+          );
+        });
+      }
     }
     
-    // Format authors with proper superscripts
-    if (authors && authors.length > 0) {
-      var orderedAffiliations = getOrderedAffiliations(authors, affiliations);
-      var affiliationMap = {};
-      
-      // Create affiliation mapping based on author order
-      orderedAffiliations.forEach(function(aff, index) {
-        affiliationMap[aff.id] = {
-          text: aff.text,
-          marker: style.affiliationStyle === 'numbers' ? (index + 1).toString() : 
-                  String.fromCharCode(97 + index)
-        };
-      });
-      
-      var fullText = '';
-      var textElements = [];
-      
-      // Build the full text and track where markers should be
-      for (var i = 0; i < authors.length; i++) {
-        var author = authors[i];
-        
-        // Add separator
-        if (i > 0) {
-          if (i === authors.length - 1 && style.useAnd) {
-            fullText += style.separator === ',' ? ', and ' : ' and ';
-          } else {
-            fullText += style.separator + ' ';
-          }
-        }
-        
-        // Get affiliation markers
-        var markerText = '';
-        if (author.affiliationIds && author.affiliationIds.length > 0) {
-          var markers = author.affiliationIds.map(function(id) {
-            return affiliationMap[id] ? affiliationMap[id].marker : '';
-          }).filter(function(marker) {
-            return marker !== '';
-          }).sort();
-          
-          if (markers.length > 0) {
-            markerText = markers.join(',');
-          }
-        }
-        
-        // Add author name and marker based on position
-        if (style.markerPosition === 'before' && markerText) {
-          if (style.markerStyle === 'parentheses') {
-            fullText += '(' + markerText + ')' + author.name;
-          } else {
-            var markerStart = fullText.length;
-            fullText += markerText + author.name;
-            textElements.push({
-              start: markerStart,
-              end: markerStart + markerText.length,
-              superscript: true
-            });
-          }
-        } else {
-          var nameStart = fullText.length;
-          fullText += author.name;
-          
-          if (markerText) {
-            var markerStart = fullText.length;
-            if (style.markerStyle === 'parentheses') {
-              fullText += '(' + markerText + ')';
-            } else {
-              fullText += markerText;
-              textElements.push({
-                start: markerStart,
-                end: markerStart + markerText.length,
-                superscript: true
-              });
-            }
-          }
-        }
-      }
-      
-      // Insert the text
-      if (cursor) {
-        var textElement = insertionPoint.asText();
-        textElement.insertText(offset, fullText);
-        
-        // Apply superscript formatting to markers
-        textElements.forEach(function(element) {
-          if (element.superscript) {
-            textElement.setTextStyle(offset + element.start, offset + element.end - 1, 
-              DocumentApp.newTextStyle().setBaselineOffset(DocumentApp.TextBaselineOffset.SUPERSCRIPT).build());
-          }
-        });
-      } else {
-        var para = insertionPoint.asParagraph();
-        para.setText(fullText);
-        
-        // Apply superscript formatting
-        textElements.forEach(function(element) {
-          if (element.superscript) {
-            para.setTextStyle(element.start, element.end - 1, 
-              DocumentApp.newTextStyle().setBaselineOffset(DocumentApp.TextBaselineOffset.SUPERSCRIPT).build());
-          }
-        });
-      }
-      
-      // Add affiliations if requested
-      if (includeAffiliations && orderedAffiliations.length > 0) {
-        var affText = '\n\n';
-        var affElements = [];
-        
-        for (var i = 0; i < orderedAffiliations.length; i++) {
-          var aff = orderedAffiliations[i];
-          var marker = style.affiliationStyle === 'numbers' ? (i + 1).toString() : 
-                      String.fromCharCode(97 + i);
-          
-          if (i > 0) {
-            affText += '\n';
-          }
-          
-          var markerStart = affText.length;
-          if (style.markerStyle === 'parentheses') {
-            affText += '(' + marker + ') ' + aff.text;
-          } else {
-            affText += marker + ' ' + aff.text;
-            affElements.push({
-              start: markerStart,
-              end: markerStart + marker.length,
-              superscript: true
-            });
-          }
-        }
-        
-        // Insert affiliation text
-        if (cursor) {
-          var textElement = insertionPoint.asText();
-          var affOffset = textElement.getText().length;
-          textElement.insertText(affOffset, affText);
-          
-          affElements.forEach(function(element) {
-            if (element.superscript) {
-              textElement.setTextStyle(affOffset + element.start, affOffset + element.end - 1, 
-                DocumentApp.newTextStyle().setBaselineOffset(DocumentApp.TextBaselineOffset.SUPERSCRIPT).build());
-            }
-          });
-        } else {
-          var affPara = body.appendParagraph(affText);
-          affElements.forEach(function(element) {
-            if (element.superscript) {
-              affPara.setTextStyle(element.start, element.end - 1, 
-                DocumentApp.newTextStyle().setBaselineOffset(DocumentApp.TextBaselineOffset.SUPERSCRIPT).build());
-            }
-          });
-        }
-      }
-    }
+    return { success: true };
   } catch (e) {
-    Logger.log('Formatting error: ' + e.toString());
-    // Fallback to simple text insertion for Sheets
-    var authorList = formatAuthorList(authors, affiliations, style);
-    var affiliationList = formatAffiliationList(authors, affiliations, style);
-    
-    var text = authorList;
-    if (includeAffiliations && affiliationList) {
-      text += '\n\n' + affiliationList;
-    }
-    
-    insertTextAtCursor(text);
+    Logger.log('Error inserting formatted text: ' + e.toString());
+    return { success: false, message: e.toString() };
   }
 }
 
 /**
- * Inserts formatted author list into document
+ * Inserts formatted author list into the document.
+ * @param {Object} style - Optional formatting style options
+ * @return {Object} Result object with success status and message
  */
-function insertAuthorList() {
-  var data = loadAuthorData();
-  
-  if (data.authors.length === 0) {
-    showMessage('No authors found. Please use Author Manager to add authors first.');
-    return;
+function insertAuthorList(style) {
+  const data = loadAuthorData();
+  if (!data.authors || data.authors.length === 0) {
+    return { success: false, message: 'No authors found. Please add authors first.' };
   }
   
-  var style = {
-    separator: ',',
-    useAnd: true,
-    affiliationStyle: 'letters', // 'letters' or 'numbers'
-    markerStyle: 'superscript', // 'superscript' or 'parentheses'
-    markerPosition: 'after' // 'before' or 'after'
-  };
-  
-  insertFormattedText(data.authors, data.affiliations, style, false);
+  return insertFormattedText(
+    data.authors,
+    data.affiliations,
+    style || getCurrentStyle(),
+    false
+  );
 }
 
 /**
- * Inserts formatted affiliation list into document
+ * Inserts formatted affiliation list into the document.
+ * @param {Object} style - Optional formatting style options
+ * @return {Object} Result object with success status and message
  */
-function insertAffiliationList() {
-  var data = loadAuthorData();
-  
-  if (data.affiliations.length === 0) {
-    showMessage('No affiliations found. Please use Author Manager to add affiliations first.');
-    return;
+function insertAffiliationList(style) {
+  const data = loadAuthorData();
+  if (!data.affiliations || data.affiliations.length === 0) {
+    return { success: false, message: 'No affiliations found. Please add affiliations first.' };
   }
   
-  var style = {
-    affiliationStyle: 'letters',
-    markerStyle: 'superscript',
-    markerPosition: 'after'
-  };
-  
-  var affiliationList = formatAffiliationList(data.authors, data.affiliations, style);
-  insertTextAtCursor(affiliationList);
+  const formatted = formatAffiliationList(data.authors, data.affiliations, style || getCurrentStyle());
+  try {
+    insertTextAtCursor(formatted.text);
+    return { success: true };
+  } catch (e) {
+    return { success: false, message: e.toString() };
+  }
 }
 
 /**
- * Inserts complete citation block (authors + affiliations)
+ * Inserts complete formatted citation into the document.
+ * @param {Object} style - Optional formatting style options
+ * @return {Object} Result object with success status and message
  */
-function insertFullCitation() {
-  var data = loadAuthorData();
-  
-  if (data.authors.length === 0) {
-    showMessage('No authors found. Please use Author Manager to add authors first.');
-    return;
+function insertFullCitation(style) {
+  const data = loadAuthorData();
+  if (!data.authors || data.authors.length === 0) {
+    return { success: false, message: 'No authors found. Please add authors first.' };
   }
   
-  var style = {
-    separator: ',',
-    useAnd: true,
-    affiliationStyle: 'letters',
-    markerStyle: 'superscript',
-    markerPosition: 'after'
-  };
-  
-  insertFormattedText(data.authors, data.affiliations, style, true);
+  return insertFormattedText(
+    data.authors,
+    data.affiliations,
+    style || getCurrentStyle(),
+    true
+  );
 }
 
 /**
- * Exports data to a new Google Sheet
+ * Exports data to a new Google Sheet.
+ * @return {Object} Result object with success status, URL, and any error message
  */
 function exportToSheet() {
-  var data = loadAuthorData();
-  
+  const data = loadAuthorData();
   if (data.authors.length === 0 && data.affiliations.length === 0) {
-    showMessage('No data to export.');
-    return;
+    return { success: false, error: 'No data to export.' };
   }
   
   try {
-    // Create new spreadsheet
-    var sheet = SpreadsheetApp.create('Author & Affiliation Data - ' + new Date().toISOString().split('T')[0]);
-    var authorSheet = sheet.getActiveSheet();
+    const sheet = SpreadsheetApp.create('Author & Affiliation Data - ' + new Date().toISOString().split('T')[0]);
+    const authorSheet = sheet.getActiveSheet();
     authorSheet.setName('Authors');
     
-    // Set up author sheet headers
-    authorSheet.getRange(1, 1, 1, 3).setValues([['Author Name', 'Affiliation IDs', 'Order']]);
-    authorSheet.getRange(1, 1, 1, 3).setFontWeight('bold');
+    // Set up authors sheet
+    authorSheet.getRange(1, 1, 1, 3)
+      .setValues([['Author Name', 'Affiliation IDs', 'Order']])
+      .setFontWeight('bold');
     
-    // Add author data with actual affiliation text
     if (data.authors.length > 0) {
-      var authorData = data.authors.map(function(author, index) {
-        var affiliationTexts = '';
-        if (author.affiliationIds && author.affiliationIds.length > 0) {
-          affiliationTexts = author.affiliationIds.map(function(id) {
-            var aff = data.affiliations.find(function(a) { return a.id === id; });
+      const authorRows = data.authors.map((author, index) => {
+        const affiliationTexts = author.affiliationIds
+          .map(id => {
+            const aff = data.affiliations.find(a => a.id === id);
             return aff ? aff.text : 'Unknown';
-          }).join('; ');
-        }
-        
-        return [
-          author.name,
-          affiliationTexts,
-          index + 1
-        ];
+          })
+          .join('; ');
+        return [author.name, affiliationTexts, index + 1];
       });
-      authorSheet.getRange(2, 1, authorData.length, 3).setValues(authorData);
+      authorSheet.getRange(2, 1, authorRows.length, 3).setValues(authorRows);
     }
     
-    // Create affiliations sheet
-    var affSheet = sheet.insertSheet('Affiliations');
-    affSheet.getRange(1, 1, 1, 3).setValues([['Affiliation ID', 'Affiliation Text', 'Order in Authors']]);
-    affSheet.getRange(1, 1, 1, 3).setFontWeight('bold');
+    // Set up affiliations sheet
+    const affSheet = sheet.insertSheet('Affiliations');
+    affSheet.getRange(1, 1, 1, 3)
+      .setValues([['Affiliation ID', 'Affiliation Text', 'Order in Authors']])
+      .setFontWeight('bold');
     
-    // Add affiliation data in author order
-    var orderedAffiliations = getOrderedAffiliations(data.authors, data.affiliations);
+    const orderedAffiliations = getOrderedAffiliations(data.authors, data.affiliations);
     if (orderedAffiliations.length > 0) {
-      var affData = orderedAffiliations.map(function(aff, index) {
-        return [
-          aff.id,
-          aff.text,
-          index + 1
-        ];
-      });
-      affSheet.getRange(2, 1, affData.length, 3).setValues(affData);
+      const affRows = orderedAffiliations.map((aff, index) => [aff.id, aff.text, index + 1]);
+      affSheet.getRange(2, 1, affRows.length, 3).setValues(affRows);
     }
     
-    // Create formatted output sheet
-    var outputSheet = sheet.insertSheet('Formatted Output');
-    
-    // Generate different format examples
-    var styles = [
-      {name: 'Nature Style (letters, superscript)', separator: ',', useAnd: true, affiliationStyle: 'letters', markerStyle: 'superscript', markerPosition: 'after'},
-      {name: 'Cell Style (numbers, parentheses)', separator: ',', useAnd: false, affiliationStyle: 'numbers', markerStyle: 'parentheses', markerPosition: 'after'},
-      {name: 'Semicolon Style (letters, parentheses)', separator: ';', useAnd: false, affiliationStyle: 'letters', markerStyle: 'parentheses', markerPosition: 'after'}
-    ];
-    
-    var outputData = [['Format Style', 'Author List', 'Affiliation List']];
-    
-    styles.forEach(function(style) {
-      var authorList = formatAuthorList(data.authors, data.affiliations, style);
-      var affiliationList = formatAffiliationList(data.authors, data.affiliations, style);
-      outputData.push([style.name, authorList, affiliationList]);
-    });
-    
-    outputSheet.getRange(1, 1, outputData.length, 3).setValues(outputData);
-    outputSheet.getRange(1, 1, 1, 3).setFontWeight('bold');
-    
-    // Auto-resize columns
+    // Format sheets
     authorSheet.autoResizeColumns(1, 3);
     affSheet.autoResizeColumns(1, 3);
-    outputSheet.autoResizeColumns(1, 3);
-    
-    var url = sheet.getUrl();
-    showMessage('Data exported successfully! Sheet URL: ' + url);
-    return {success: true, url: url};
-    
+
+    return { success: true, url: sheet.getUrl() };
   } catch (e) {
     Logger.log('Export error: ' + e.toString());
-    showMessage('Error exporting data: ' + e.toString());
-    return {success: false, error: e.toString()};
+    return { success: false, error: e.toString() };
   }
 }
 
 /**
- * Links to an existing Google Sheet (saves the sheet ID for future updates)
+ * Links to an existing Google Sheet.
+ * @param {string} sheetUrl - URL of the Google Sheet to link
+ * @return {Object} Result object with success status and message
  */
 function linkToSheet(sheetUrl) {
   try {
-    var sheetId = extractSheetId(sheetUrl);
+    const sheetId = extractSheetId(sheetUrl);
     if (!sheetId) {
-      return {success: false, message: 'Invalid Google Sheets URL'};
+      return { success: false, message: 'Invalid Google Sheets URL' };
     }
     
-    // Save the linked sheet ID
-    var properties = PropertiesService.getDocumentProperties();
+    const properties = PropertiesService.getDocumentProperties();
     properties.setProperty('linkedSheetId', sheetId);
     
-    // Update the linked sheet with current data
     return updateLinkedSheet();
-    
   } catch (e) {
     Logger.log('Link error: ' + e.toString());
-    return {success: false, message: 'Error linking to sheet: ' + e.toString()};
+    return { success: false, message: 'Error linking to sheet: ' + e.toString() };
   }
 }
 
 /**
- * Updates the linked Google Sheet with current data
+ * Updates the linked Google Sheet with current data.
+ * @return {Object} Result object with success status and message
  */
 function updateLinkedSheet() {
   try {
-    var properties = PropertiesService.getDocumentProperties();
-    var sheetId = properties.getProperty('linkedSheetId');
+    const properties = PropertiesService.getDocumentProperties();
+    const sheetId = properties.getProperty('linkedSheetId');
     
     if (!sheetId) {
-      return {success: false, message: 'No linked sheet found. Please link to a sheet first.'};
+      return { 
+        success: false, 
+        message: 'No linked sheet found. Please link to a sheet first.' 
+      };
     }
     
-    var data = loadAuthorData();
-    var sheet = SpreadsheetApp.openById(sheetId);
+    const data = loadAuthorData();
+    const sheet = SpreadsheetApp.openById(sheetId);
     
-    // Update or create Authors sheet
-    var authorSheet;
-    try {
-      authorSheet = sheet.getSheetByName('Authors');
-    } catch (e) {
-      authorSheet = sheet.insertSheet('Authors');
-    }
-    
-    // Clear existing data and add headers
+    // Update authors sheet
+    let authorSheet = sheet.getSheetByName('Authors') || sheet.insertSheet('Authors');
     authorSheet.clear();
-    authorSheet.getRange(1, 1, 1, 3).setValues([['Author Name', 'Affiliations', 'Order']]);
-    authorSheet.getRange(1, 1, 1, 3).setFontWeight('bold');
+    authorSheet.getRange(1, 1, 1, 3)
+      .setValues([['Author Name', 'Affiliations', 'Order']])
+      .setFontWeight('bold');
     
-    // Add author data with actual affiliation text
     if (data.authors.length > 0) {
-      var authorData = data.authors.map(function(author, index) {
-        var affiliationTexts = '';
-        if (author.affiliationIds && author.affiliationIds.length > 0) {
-          affiliationTexts = author.affiliationIds.map(function(id) {
-            var aff = data.affiliations.find(function(a) { return a.id === id; });
+      const authorRows = data.authors.map((author, index) => {
+        const affiliationTexts = author.affiliationIds
+          .map(id => {
+            const aff = data.affiliations.find(a => a.id === id);
             return aff ? aff.text : 'Unknown';
-          }).join('; ');
-        }
-        
-        return [
-          author.name,
-          affiliationTexts,
-          index + 1
-        ];
+          })
+          .join('; ');
+        return [author.name, affiliationTexts, index + 1];
       });
-      authorSheet.getRange(2, 1, authorData.length, 3).setValues(authorData);
+      authorSheet.getRange(2, 1, authorRows.length, 3).setValues(authorRows);
     }
     
-    // Update Affiliations sheet
-    var affSheet;
-    try {
-      affSheet = sheet.getSheetByName('Affiliations');
-    } catch (e) {
-      affSheet = sheet.insertSheet('Affiliations');
-    }
-    
+    // Update affiliations sheet
+    let affSheet = sheet.getSheetByName('Affiliations') || sheet.insertSheet('Affiliations');
     affSheet.clear();
-    affSheet.getRange(1, 1, 1, 2).setValues([['Affiliation Text', 'Order in Authors']]);
-    affSheet.getRange(1, 1, 1, 2).setFontWeight('bold');
+    affSheet.getRange(1, 1, 1, 2)
+      .setValues([['Affiliation Text', 'Order in Authors']])
+      .setFontWeight('bold');
     
-    var orderedAffiliations = getOrderedAffiliations(data.authors, data.affiliations);
+    const orderedAffiliations = getOrderedAffiliations(data.authors, data.affiliations);
     if (orderedAffiliations.length > 0) {
-      var affData = orderedAffiliations.map(function(aff, index) {
-        return [
-          aff.text,
-          index + 1
-        ];
-      });
-      affSheet.getRange(2, 1, affData.length, 2).setValues(affData);
+      const affRows = orderedAffiliations.map((aff, index) => [aff.text, index + 1]);
+      affSheet.getRange(2, 1, affRows.length, 2).setValues(affRows);
     }
     
-    return {success: true, message: 'Linked sheet updated successfully!'};
-    
+    return { success: true, message: 'Linked sheet updated successfully!' };
   } catch (e) {
     Logger.log('Update linked sheet error: ' + e.toString());
-    return {success: false, message: 'Error updating linked sheet: ' + e.toString()};
+    return { success: false, message: 'Error updating linked sheet: ' + e.toString() };
   }
 }
 
 /**
- * Extracts Google Sheets ID from URL
+ * Extracts Google Sheets ID from URL.
+ * @param {string} url - Google Sheets URL
+ * @return {string|null} Sheet ID if found, null otherwise
  */
 function extractSheetId(url) {
-  var match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
   return match ? match[1] : null;
 }
 
 /**
- * Inserts text at cursor position (works for both Docs and Sheets)
+ * Inserts plain text at cursor position (works for both Docs and Sheets).
+ * @param {string} text - Text to insert
  */
 function insertTextAtCursor(text) {
   try {
-    // Try Google Docs first
-    var doc = DocumentApp.getActiveDocument();
-    var cursor = doc.getCursor();
-    
+    const doc = DocumentApp.getActiveDocument();
+    const cursor = doc.getCursor();
     if (cursor) {
       cursor.insertText(text);
     } else {
-      var body = doc.getBody();
-      body.appendParagraph(text);
+      doc.getBody().appendParagraph(text);
     }
   } catch (e) {
     try {
-      // If Docs fails, try Sheets
-      var sheet = SpreadsheetApp.getActiveSheet();
-      var range = sheet.getActiveRange();
-      
+      const sheet = SpreadsheetApp.getActiveSheet();
+      const range = sheet.getActiveRange();
       if (range) {
         range.setValue(text);
       }
     } catch (e2) {
       Logger.log('Could not insert text: ' + e2.toString());
-      showMessage('Could not insert text. Please try selecting a location first.');
     }
   }
 }
 
 /**
- * Shows a message to the user
+ * Shows a message to the user via an alert.
+ * @param {string} message - Message to display
  */
 function showMessage(message) {
-  var ui;
+  let ui;
   try {
     ui = DocumentApp.getUi();
   } catch (e) {
     ui = SpreadsheetApp.getUi();
   }
-  
-  ui.alert('Author Manager', message, ui.ButtonSet.OK);
+  ui.alert(message);
 }
 
 /**
- * Clears all saved author and affiliation data
+ * Clears all saved author and affiliation data.
  */
 function clearAllData() {
-  var ui;
+  let ui;
   try {
     ui = DocumentApp.getUi();
   } catch (e) {
     ui = SpreadsheetApp.getUi();
   }
   
-  var response = ui.alert('Clear All Data', 
-    'Are you sure you want to clear all saved authors and affiliations?', 
-    ui.ButtonSet.YES_NO);
+  const response = ui.alert(
+    'Clear All Data',
+    'Are you sure you want to clear all saved authors and affiliations?',
+    ui.ButtonSet.YES_NO
+  );
   
   if (response === ui.Button.YES) {
-    var properties = PropertiesService.getDocumentProperties();
+    const properties = PropertiesService.getDocumentProperties();
     properties.deleteProperty('authors');
     properties.deleteProperty('affiliations');
     
     authorData = [];
     affiliationData = [];
-    
     showMessage('All data has been cleared.');
   }
-}
-
-/**
- * Utility function to generate unique IDs
- */
-function generateId() {
-  return 'id_' + Math.random().toString(36).substr(2, 9);
 }
