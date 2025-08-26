@@ -205,6 +205,19 @@ function formatAuthorList(authors, affiliations, style) {
         } else {
           result += style.separator === ',' ? ', and ' : ' and ';
         }
+      } else if (i === authors.length - 1) {
+        // Last author with no "and" - no separator needed
+        // Only add marker if it's after-separator position
+        if (style.markerPosition === 'after-separator' && markerText) {
+          currentOffset = result.length;
+          result += markerText;
+          if (style.markerStyle === 'superscript') {
+            textElements.push({
+              start: currentOffset,
+              end: currentOffset + markerText.length
+            });
+          }
+        }
       } else {
         if (style.markerPosition === 'after-separator' && markerText) {
           result += style.separator; // Remove extra space before marker
