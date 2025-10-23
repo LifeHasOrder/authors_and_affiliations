@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://lifehasorder.github.io/authors_and_affiliations/sitemap.xml
